@@ -76,8 +76,11 @@ class Kable:
                 self.startFlushQueueIfFullTimer()
 
                 self.kill = False
-                signal.signal(signal.SIGINT, self.exitGracefully)
-                signal.signal(signal.SIGTERM, self.exitGracefully)
+                try:
+                    signal.signal(signal.SIGINT, self.exitGracefully)
+                    signal.signal(signal.SIGTERM, self.exitGracefully)
+                except:
+                    print("")
 
                 print("Kable initialized successfully")
 
