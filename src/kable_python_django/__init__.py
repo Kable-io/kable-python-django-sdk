@@ -7,7 +7,7 @@ from datetime import datetime
 from cachetools import TTLCache
 from functools import wraps
 from threading import Timer
-from flask import request, abort
+from django.http import HttpResponse
 
 
 KABLE_ENVIRONMENT_HEADER_KEY = 'KABLE-ENVIRONMENT'
@@ -93,6 +93,7 @@ class Kable:
     def authenticate(self, api):
         @wraps(api)
         def decoratedApi(*args, **kwargs):
+            request = args[0]
             headers = request.headers
 
             clientId = headers[X_CLIENT_ID_HEADER_KEY] if X_CLIENT_ID_HEADER_KEY in headers else None
@@ -103,11 +104,10 @@ class Kable:
             self.enqueueMessage(clientId, requestId, request)
 
             if self.environment is None or self.kableClientId is None:
-                abort(500, {
-                      "message": "Unauthorized. Failed to initialize Kable: Configuration invalid"})
+                return HttpResponse('{"message": "Unauthorized. Failed to initialize Kable: Configuration invalid"}', 500)
 
             if clientId is None or secretKey is None:
-                abort(401, {"message": "Unauthorized"})
+                return HttpResponse('{"message": "Unauthorized"}', 401)
 
             if secretKey in self.validCache:
                 # print("Valid Cache Hit")
@@ -115,7 +115,7 @@ class Kable:
 
             if secretKey in self.invalidCache:
                 # print("Invalid Cache Hit")
-                abort(401, {"message": "Unauthorized"})
+                return HttpResponse('{"message": "Unauthorized"}', 401)
 
             # print("Authenticating at server")
 
@@ -137,14 +137,13 @@ class Kable:
                 else:
                     if status == 401:
                         self.invalidCache.__setitem__(secretKey, clientId)
-                        abort(401, {"message": "Unauthorized"})
+                        return HttpResponse('{"message": "Unauthorized"}', 401)
                     else:
-                        print("Unexpected " + status +
-                              " response from Kable authenticate. Please update your SDK to the latest version immediately")
-                        abort(500, {"message": "Something went wrong"})
+                        print("Unexpected " + status + " response from Kable authenticate. Please update your SDK to the latest version immediately")
+                        return HttpResponse('{"message": "Something went wrong"}', 500)
 
             except Exception as e:
-                abort(500, {"message": "Something went wrong"})
+                return HttpResponse('{"message": "Something went wrong"}', 500)
 
         return decoratedApi
 
@@ -160,7 +159,7 @@ class Kable:
         message['client_id'] = clientId
 
         request = {}
-        request['url'] = req.url
+        request['url'] = req.path
         request['method'] = req.method
         # headers
         # body
