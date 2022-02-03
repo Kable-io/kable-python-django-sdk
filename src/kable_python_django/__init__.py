@@ -7,7 +7,7 @@ from datetime import datetime
 from cachetools import TTLCache
 from functools import wraps
 from threading import Timer
-from django.http import HttpResponse
+from django.http import JsonResponse
 
 
 KABLE_ENVIRONMENT_HEADER_KEY = 'KABLE-ENVIRONMENT'
@@ -104,10 +104,10 @@ class Kable:
             self.enqueueMessage(clientId, requestId, request)
 
             if self.environment is None or self.kableClientId is None:
-                return HttpResponse('{"message": "Unauthorized. Failed to initialize Kable: Configuration invalid"}', 500)
+                return JsonResponse({"message": "Unauthorized. Failed to initialize Kable: Configuration invalid"}, status=500)
 
             if clientId is None or secretKey is None:
-                return HttpResponse('{"message": "Unauthorized"}', 401)
+                return JsonResponse({"message": "Unauthorized"}, status=401)
 
             if secretKey in self.validCache:
                 # print("Valid Cache Hit")
@@ -115,7 +115,7 @@ class Kable:
 
             if secretKey in self.invalidCache:
                 # print("Invalid Cache Hit")
-                return HttpResponse('{"message": "Unauthorized"}', 401)
+                return JsonResponse({"message": "Unauthorized"}, status=401)
 
             # print("Authenticating at server")
 
@@ -137,13 +137,13 @@ class Kable:
                 else:
                     if status == 401:
                         self.invalidCache.__setitem__(secretKey, clientId)
-                        return HttpResponse('{"message": "Unauthorized"}', 401)
+                        return JsonResponse({"message": "Unauthorized"}, status=401)
                     else:
                         print("Unexpected " + status + " response from Kable authenticate. Please update your SDK to the latest version immediately")
-                        return HttpResponse('{"message": "Something went wrong"}', 500)
+                        return JsonResponse({"message": "Something went wrong"}, status=500)
 
             except Exception as e:
-                return HttpResponse('{"message": "Something went wrong"}', 500)
+                return JsonResponse({"message": "Something went wrong"}, status=500)
 
         return decoratedApi
 
