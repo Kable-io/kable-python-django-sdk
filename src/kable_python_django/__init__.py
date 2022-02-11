@@ -114,12 +114,14 @@ class Kable:
                 return JsonResponse({"message": "Unauthorized"}, status=401)
 
             if secretKey in self.validCache:
-                # print("Valid Cache Hit")
-                return api(*args)
+                if self.validCache[secretKey] is clientId:
+                  # print("Valid Cache Hit")
+                  return api(*args)
 
             if secretKey in self.invalidCache:
-                # print("Invalid Cache Hit")
-                return JsonResponse({"message": "Unauthorized"}, status=401)
+                if self.invalidCache[secretKey] is clientId:
+                  # print("Invalid Cache Hit")
+                  return JsonResponse({"message": "Unauthorized"}, status=401)
 
             # print("Authenticating at server")
 
