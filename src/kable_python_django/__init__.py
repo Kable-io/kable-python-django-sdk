@@ -14,7 +14,6 @@ KABLE_CLIENT_ID_HEADER_KEY = 'KABLE-CLIENT-ID'
 KABLE_CLIENT_SECRET_HEADER_KEY = 'KABLE-CLIENT-SECRET'
 X_CLIENT_ID_HEADER_KEY = 'X-CLIENT-ID'
 X_API_KEY_HEADER_KEY = 'X-API-KEY'
-X_REQUEST_ID_HEADER_KEY = 'X-REQUEST-ID'
 
 
 class Kable:
@@ -100,6 +99,38 @@ class Kable:
         except Exception as e:
             print("Failed to initialize Kable: Something went wrong")
 
+    def record(self, data):
+        if (self.debug):
+            print("Received data to record")
+
+        clientId = None
+        if 'clientId' in data:
+            clientId = data['clientId']
+            del data['clientId']
+
+        customerId = None
+        if 'customerId' in data:
+            customerId = data['customerId']
+            del data['customerId']
+
+        self.enqueueEvent(clientId=clientId, customerId=customerId, data=data)
+
+    def recordRequest(self, api):
+        @wraps(api)
+        def decoratedApi(*args, **kwargs):
+            if self.debug:
+                print("Received request to record")
+
+            request = args[0]
+            headers = request.headers
+            clientId = headers[X_CLIENT_ID_HEADER_KEY] if X_CLIENT_ID_HEADER_KEY in headers else None
+
+            self.enqueueEvent(clientId, None, {})
+
+            return api(*args)
+
+        return decoratedApi
+
     def authenticate(self, api):
         @wraps(api)
         def decoratedApi(*args, **kwargs):
@@ -112,7 +143,7 @@ class Kable:
             clientId = headers[X_CLIENT_ID_HEADER_KEY] if X_CLIENT_ID_HEADER_KEY in headers else None
             secretKey = headers[X_API_KEY_HEADER_KEY] if X_API_KEY_HEADER_KEY in headers else None
 
-            self.enqueueEvent(clientId)
+            self.enqueueEvent(clientId, None, {})
 
             if self.environment is None or self.kableClientId is None:
                 return JsonResponse({"message": "Unauthorized. Failed to initialize Kable: Configuration invalid"}, status=500)
@@ -162,14 +193,15 @@ class Kable:
 
         return decoratedApi
 
-    def enqueueEvent(self, clientId):
+    def enqueueEvent(self, clientId, customerId, data):
         event = {}
         event['environment'] = self.environment
         event['kableClientId'] = self.kableClientId
         event['clientId'] = clientId
+        event['customerId'] = customerId
         event['timestamp'] = datetime.utcnow().isoformat()
 
-        event['data'] = {}
+        event['data'] = data
 
         library = {}
         library['name'] = 'kable-python-django'
@@ -251,7 +283,3 @@ class Kable:
             f'Kable will shut down gracefully within {self.queueFlushInterval} seconds')
         self.kill = True
         self.flushQueue()
-
-
-def configure(config):
-    return Kable(config)
