@@ -166,7 +166,7 @@ class Kable:
         event = {}
         event['environment'] = self.environment
         event['kableClientId'] = self.kableClientId
-        event['customerId'] = clientId
+        event['clientId'] = clientId
         event['timestamp'] = datetime.utcnow().isoformat()
 
         event['data'] = {}
