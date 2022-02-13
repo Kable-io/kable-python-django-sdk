@@ -115,21 +115,6 @@ class Kable:
 
         self.enqueueEvent(clientId=clientId, customerId=customerId, data=data)
 
-    def recordRequest(self, api):
-        @wraps(api)
-        def decoratedApi(*args, **kwargs):
-            if self.debug:
-                print("Received request to record")
-
-            request = args[0]
-            headers = request.headers
-            clientId = headers[X_CLIENT_ID_HEADER_KEY] if X_CLIENT_ID_HEADER_KEY in headers else None
-
-            self.enqueueEvent(clientId, None, {})
-
-            return api(*args)
-
-        return decoratedApi
 
     def authenticate(self, api):
         @wraps(api)
@@ -143,8 +128,6 @@ class Kable:
             clientId = headers[X_CLIENT_ID_HEADER_KEY] if X_CLIENT_ID_HEADER_KEY in headers else None
             secretKey = headers[X_API_KEY_HEADER_KEY] if X_API_KEY_HEADER_KEY in headers else None
 
-            self.enqueueEvent(clientId, None, {})
-
             if self.environment is None or self.kableClientId is None:
                 return JsonResponse({"message": "Unauthorized. Failed to initialize Kable: Configuration invalid"}, status=500)
 
@@ -155,6 +138,7 @@ class Kable:
                 if self.validCache[secretKey] == clientId:
                     if self.debug:
                         print("Valid Cache Hit")
+                    self.enqueueEvent(clientId, None, {})
                     return api(*args)
 
             if secretKey in self.invalidCache:
@@ -178,6 +162,7 @@ class Kable:
                 status = response.status_code
                 if (status == 200):
                     self.validCache.__setitem__(secretKey, clientId)
+                    self.enqueueEvent(clientId, None, {})
                     return api(*args)
                 else:
                     if status == 401:
