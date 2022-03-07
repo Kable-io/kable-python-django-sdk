@@ -1,11 +1,10 @@
 import sys
 import signal
 import requests
-from xml.etree.ElementTree import VERSION
 from datetime import datetime
 from cachetools import TTLCache
 from functools import wraps
-from threading import Timer
+from threading import Event, Thread
 from django.http import JsonResponse
 
 
@@ -54,12 +53,18 @@ class Kable:
         else:
             self.debug = False
 
-        if "disable_cache" in config:
-            self.disableCache = config["disable_cache"]
-            if self.disableCache:
-                print("Starting Kable with disable_cache enabled")
+        if "max_queue_size" in config:
+            self.maxQueueSize = config["max_queue_size"]
+            if self.maxQueueSize > 100:
+                self.maxQueueSize = 100
         else:
-            self.disableCache = False
+            self.maxQueueSize = 10  # flush after 10 requests queued
+
+        if "disable_cache" in config:
+            disableCache = config["disable_cache"]
+            if disableCache:
+                self.maxQueueSize = 1
+        print("Starting Kable with max_queue_size " + str(self.maxQueueSize))
 
         if "record_authentication" in config:
             self.recordAuthentication = config["record_authentication"]
@@ -71,14 +76,10 @@ class Kable:
 
         self.queueFlushInterval = 10  # 10 seconds
         self.queueFlushTimer = None
-        self.queueFlushMaxCount = 10  # 10 requests
-        self.queueFlushMaxPoller = None
         self.queue = []
 
         self.validCache = TTLCache(maxsize=1000, ttl=30)
         self.invalidCache = TTLCache(maxsize=1000, ttl=30)
-
-        self.kableEnvironment = "live" if self.environment == "live" else "test"
 
         url = f"{self.baseUrl}/api/authenticate"
         headers = {
@@ -94,9 +95,7 @@ class Kable:
             status = response.status_code
             if (status == 200):
                 self.startFlushQueueOnTimer()
-                self.startFlushQueueIfFullTimer()
 
-                self.kill = False
                 try:
                     signal.signal(signal.SIGINT, self.exitGracefully)
                     signal.signal(signal.SIGTERM, self.exitGracefully)
@@ -130,7 +129,6 @@ class Kable:
             del data['customerId']
 
         self.enqueueEvent(clientId=clientId, customerId=customerId, data=data)
-
 
     def authenticate(self, api):
         @wraps(api)
@@ -208,28 +206,16 @@ class Kable:
 
         library = {}
         library['name'] = 'kable-python-django'
-        library['version'] = VERSION
+        library['version'] = '2.3.6'
         event['library'] = library
 
         self.queue.append(event)
-        if self.disableCache:
+        if len(self.queue) >= self.maxQueueSize:
             self.flushQueue()
 
     def flushQueue(self):
         if self.debug:
             print("Flushing Kable event queue...")
-
-        if self.queueFlushTimer is not None:
-            if self.debug:
-                print('Stopping time-based queue poller')
-            self.queueFlushTimer.cancel()
-            self.queueFlushTimer = None
-
-        if self.queueFlushMaxPoller is not None:
-            if self.debug:
-                print('Stopping size-based queue poller')
-            self.queueFlushMaxPoller.cancel()
-            self.queueFlushMaxPoller = None
 
         events = self.queue
         self.queue = []
@@ -254,37 +240,39 @@ class Kable:
                         f'Successfully sent {count} events to Kable server')
                 else:
                     print(f'Failed to send {count} events to Kable server')
+                    for event in events:
+                        print(f'Kable Event (Error): {event}')
 
             except Exception as e:
                 print(f'Failed to send {count} events to Kable server')
+                for event in events:
+                    print(f'Kable Event (Error): {event}')
+
         else:
             if self.debug:
                 print('...no Kable events to flush...')
 
-        if self.kill:
-            sys.exit(0)
-        else:
-            self.startFlushQueueOnTimer()
-            self.startFlushQueueIfFullTimer()
-
     def startFlushQueueOnTimer(self):
         if self.debug:
             print('Starting time-based queue poller')
-        self.queueFlushTimer = Timer(
-            self.queueFlushInterval, self.flushQueue).start()
 
-    def startFlushQueueIfFullTimer(self):
-        if self.debug:
-            print('Starting size-based queue poller')
-        self.queueMaxPoller = Timer(1, self.flushQueueIfFull).start()
-
-    def flushQueueIfFull(self):
-        events = self.queue
-        if len(events) >= self.queueFlushMaxCount:
-            self.flushQueue()
+        self.killFlag = Event()
+        self.queueFlushTimer = Kable.FlushTimer(self, self.killFlag)
+        self.queueFlushTimer.start()
 
     def exitGracefully(self, *args):
         print(
             f'Kable will shut down gracefully within {self.queueFlushInterval} seconds')
-        self.kill = True
         self.flushQueue()
+        self.killFlag.set()
+        sys.exit(0)
+
+    class FlushTimer(Thread):
+        def __init__(self, outer, killFlag):
+            Thread.__init__(self)
+            self.outer = outer
+            self.stopped = killFlag
+
+        def run(self):
+            while not self.stopped.wait(10):
+                self.outer.flushQueue()
