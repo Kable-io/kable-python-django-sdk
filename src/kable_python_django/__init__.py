@@ -4,7 +4,7 @@ import requests
 from datetime import datetime
 from cachetools import TTLCache
 from functools import wraps
-from threading import Event, Thread
+from threading import Timer
 from django.http import JsonResponse
 
 
@@ -19,27 +19,27 @@ class Kable:
 
     def __init__(self, config):
 
-        print("Initializing Kable")
+        print("[KABLE] Initializing Kable")
 
         if config is None:
             raise RuntimeError(
-                "Failed to initialize Kable: config not provided")
+                "[KABLE] Failed to initialize Kable: config not provided")
 
         if "environment" not in config:
             raise RuntimeError(
-                'Failed to initialize Kable: environment not provided')
+                '[KABLE] Failed to initialize Kable: environment not provided')
 
         if "client_id" not in config:
             raise RuntimeError(
-                'Failed to initialize Kable: client_id not provided')
+                '[KABLE] Failed to initialize Kable: client_id not provided')
 
         if "client_secret" not in config:
             raise RuntimeError(
-                'Failed to initialize Kable: client_secret not provided')
+                '[KABLE] Failed to initialize Kable: client_secret not provided')
 
         if "base_url" not in config:
             raise RuntimeError(
-                'Failed to initialize Kable: base_url not provided')
+                '[KABLE] Failed to initialize Kable: base_url not provided')
 
         self.environment = config["environment"]
         self.kableClientId = config["client_id"]
@@ -49,7 +49,7 @@ class Kable:
         if "debug" in config:
             self.debug = config["debug"]
             if self.debug:
-                print("Starting Kable with debug enabled")
+                print("[KABLE] Starting Kable with debug enabled")
         else:
             self.debug = False
 
@@ -64,13 +64,14 @@ class Kable:
             disableCache = config["disable_cache"]
             if disableCache:
                 self.maxQueueSize = 1
-        print("Starting Kable with max_queue_size " + str(self.maxQueueSize))
+        print("[KABLE] Starting Kable with max_queue_size " +
+              str(self.maxQueueSize))
 
         if "record_authentication" in config:
             self.recordAuthentication = config["record_authentication"]
             if self.recordAuthentication is False:
                 print(
-                    "Starting Kable with record_authentication disabled, authentication requests will not be recorded")
+                    "[KABLE] Starting Kable with record_authentication disabled, authentication requests will not be recorded")
         else:
             self.recordAuthentication = True
 
@@ -93,30 +94,31 @@ class Kable:
         try:
             response = requests.post(url=url, headers=headers)
             status = response.status_code
-            if (status == 200):
-                self.startFlushQueueOnTimer()
+            if status == 200:
+                self.startFlushQueueTimer()
 
                 try:
                     signal.signal(signal.SIGINT, self.exitGracefully)
                     signal.signal(signal.SIGTERM, self.exitGracefully)
-                except:
-                    print("")
+                except Exception as e:
+                    print(e)
 
-                print("Kable initialized successfully")
+                print("[KABLE] Kable initialized successfully")
 
             elif status == 401:
-                print("Failed to initialize Kable: Unauthorized")
+                print("[KABLE] Failed to initialize Kable: Unauthorized")
 
             else:
                 print(
-                    f"Failed to initialize Kable: Something went wrong [{status}]")
+                    f"[KABLE] Failed to initialize Kable: Something went wrong [{status}]")
 
         except Exception as e:
-            print("Failed to initialize Kable: Something went wrong")
+            print(e)
+            print("[KABLE] Failed to initialize Kable: Something went wrong")
 
     def record(self, data):
-        if (self.debug):
-            print("Received data to record")
+        if self.debug:
+            print("[KABLE] Received data to record")
 
         clientId = None
         if 'clientId' in data:
@@ -128,13 +130,15 @@ class Kable:
             customerId = data['customerId']
             del data['customerId']
 
-        self.enqueueEvent(clientId=clientId, customerId=customerId, data=data)
+        self.enqueueMessage(clientId=clientId,
+                            customerId=customerId, data=data)
 
     def authenticate(self, api):
         @wraps(api)
         def decoratedApi(*args, **kwargs):
+
             if self.debug:
-                print("Received request to authenticate")
+                print("[KABLE] Received request to authenticate")
 
             request = args[0]
             headers = request.headers
@@ -151,19 +155,19 @@ class Kable:
             if secretKey in self.validCache:
                 if self.validCache[secretKey] == clientId:
                     if self.debug:
-                        print("Valid Cache Hit")
+                        print("[KABLE] Valid Cache Hit")
                     if self.recordAuthentication:
-                        self.enqueueEvent(clientId, None, {})
-                    return api(*args)
+                        self.enqueueMessage(clientId, None, {})
+                    return api(*args, **kwargs)
 
             if secretKey in self.invalidCache:
                 if self.invalidCache[secretKey] == clientId:
                     if self.debug:
-                        print("Invalid Cache Hit")
+                        print("[KABLE] Invalid Cache Hit")
                     return JsonResponse({"message": "Unauthorized"}, status=401)
 
             if self.debug:
-                print("Authenticating at server")
+                print("[KABLE] Authenticating at server")
 
             url = f"{self.baseUrl}/api/authenticate"
             headers = {
@@ -178,23 +182,24 @@ class Kable:
                 if (status == 200):
                     self.validCache.__setitem__(secretKey, clientId)
                     if self.recordAuthentication:
-                        self.enqueueEvent(clientId, None, {})
-                    return api(*args)
+                        self.enqueueMessage(clientId, None, {})
+                    return api(*args, **kwargs)
                 else:
                     if status == 401:
                         self.invalidCache.__setitem__(secretKey, clientId)
                         return JsonResponse({"message": "Unauthorized"}, status=401)
                     else:
-                        print("Unexpected " + status +
+                        print("[KABLE] Unexpected " + status +
                               " response from Kable authenticate. Please update your SDK to the latest version immediately")
                         return JsonResponse({"message": "Something went wrong"}, status=500)
 
             except Exception as e:
+                print(e)
                 return JsonResponse({"message": "Something went wrong"}, status=500)
 
         return decoratedApi
 
-    def enqueueEvent(self, clientId, customerId, data):
+    def enqueueMessage(self, clientId, customerId, data):
         event = {}
         event['environment'] = self.environment
         event['kableClientId'] = self.kableClientId
@@ -206,7 +211,8 @@ class Kable:
 
         library = {}
         library['name'] = 'kable-python-django'
-        library['version'] = '2.3.6'
+        library['version'] = '2.4.1'
+
         event['library'] = library
 
         self.queue.append(event)
@@ -215,14 +221,14 @@ class Kable:
 
     def flushQueue(self):
         if self.debug:
-            print("Flushing Kable event queue...")
+            print("[KABLE] Flushing Kable event queue...")
 
         events = self.queue
         self.queue = []
         count = len(events)
-        if (count > 0):
+        if count > 0:
             if self.debug:
-                print(f'Sending {count} batched events to server')
+                print(f'[KABLE] Sending {count} batched events to server')
 
             url = f"{self.baseUrl}/api/events"
             headers = {
@@ -235,44 +241,62 @@ class Kable:
                 response = requests.post(
                     url=url, headers=headers, json=events)
                 status = response.status_code
-                if (status == 200):
+                if status == 200:
                     print(
-                        f'Successfully sent {count} events to Kable server')
+                        f'[KABLE] Successfully sent {count} events to Kable server')
                 else:
-                    print(f'Failed to send {count} events to Kable server')
+                    print(
+                        f'[KABLE] Failed to send {count} events to Kable server')
                     for event in events:
-                        print(f'Kable Event (Error): {event}')
+                        print(f'[KABLE] Kable Event (Error): {event}')
 
             except Exception as e:
-                print(f'Failed to send {count} events to Kable server')
+                print(e)
+                print(f'[KABLE] Failed to send {count} events to Kable server')
                 for event in events:
-                    print(f'Kable Event (Error): {event}')
+                    print(f'[KABLE] Kable Event (Error): {event}')
 
         else:
             if self.debug:
-                print('...no Kable events to flush...')
+                print('[KABLE] ...no Kable events to flush...')
 
-    def startFlushQueueOnTimer(self):
+    def startFlushQueueTimer(self):
         if self.debug:
-            print('Starting time-based queue poller')
-
-        self.killFlag = Event()
-        self.queueFlushTimer = Kable.FlushTimer(self, self.killFlag)
+            print('[KABLE] Starting time-based queue poller')
+        self.queueFlushTimer = Kable.RepeatedTimer(
+            self.queueFlushInterval, self.flushQueue)
         self.queueFlushTimer.start()
 
-    def exitGracefully(self, *args):
-        print(
-            f'Kable will shut down gracefully within {self.queueFlushInterval} seconds')
+    def exitGracefully(self, *args):  # args is necessary for signal handler
+        if self.debug:
+            print(f'[KABLE] Kable shutting down')
         self.flushQueue()
-        self.killFlag.set()
+        self.queueFlushTimer.stop()
         sys.exit(0)
 
-    class FlushTimer(Thread):
-        def __init__(self, outer, killFlag):
-            Thread.__init__(self)
-            self.outer = outer
-            self.stopped = killFlag
+    class RepeatedTimer(object):
 
-        def run(self):
-            while not self.stopped.wait(10):
-                self.outer.flushQueue()
+        def __init__(self, interval, function):  # , *args, **kwargs):
+            self._timer = None
+            self.interval = interval
+            self.function = function
+            # self.args = args
+            # self.kwargs = kwargs
+            self.is_running = False
+            self.start()
+
+        def _run(self):
+            self.is_running = False
+            self.start()
+            self.function()  # *self.args, **self.kwargs)
+
+        def start(self):
+            if not self.is_running:
+                self._timer = Timer(self.interval, self._run)
+                self._timer.daemon = True
+                self._timer.start()
+                self.is_running = True
+
+        def stop(self):
+            self._timer.cancel()
+            self.is_running = False
