@@ -230,7 +230,7 @@ class Kable:
             if self.debug:
                 print(f'[KABLE] Sending {count} batched events to server')
 
-            url = f"{self.baseUrl}/api/events"
+            url = f"{self.baseUrl}/api/events/create"
             headers = {
                 KABLE_ENVIRONMENT_HEADER_KEY: self.environment,
                 KABLE_CLIENT_ID_HEADER_KEY: self.kableClientId,
