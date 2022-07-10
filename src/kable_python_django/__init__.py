@@ -195,7 +195,7 @@ class Kable:
 
         library = {}
         library['name'] = 'kable-python-django'
-        library['version'] = '2.5.1'
+        library['version'] = '3.0.0'
 
         event['library'] = library
 
